@@ -1,0 +1,34 @@
+// NETLIFY.TOML Configuration
+// File location: netlify.toml (root of your project)
+// This tells Netlify how to build and deploy your functions
+
+[build]
+  # Directory containing your functions
+  functions = "netlify/functions"
+  # Build command (if you're using a build tool)
+  command = "echo 'No build required for static + functions'"
+
+# Redirect all requests to index.html for single-page app
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# API functions don't need redirect
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+[functions]
+  # Node.js configuration
+  node_bundler = "esbuild"
+  
+# Environment variables (add your own if needed)
+[build.environment]
+  NODE_VERSION = "18.17.0"
+
+# Optional: Increase function timeout if needed
+[[edge_functions]]
+  path = "/"
+  function = "handler"
