@@ -2952,6 +2952,173 @@ function filterCases() {
 }
 
 // ============================================
+// STORAGE & SYNC FUNCTIONS
+// ============================================
+
+// Generate UUID for user identification
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+// Get or create user ID
+function getUserId() {
+  let userId = localStorage.getItem('casePracticeUserId');
+  if (!userId) {
+    userId = generateUUID();
+    localStorage.setItem('casePracticeUserId', userId);
+    console.log('Created new userId:', userId);
+  }
+  return userId;
+}
+
+// Initialize user session
+function initializeUser() {
+  const userId = getUserId();
+  console.log('User ID:', userId);
+  loadProgressFromCloud();
+}
+
+// Load progress from Netlify Blobs
+async function loadProgressFromCloud() {
+  const userId = getUserId();
+  console.log('Loading progress for userId:', userId);
+  
+  try {
+    const response = await fetch(`/.netlify/functions/load-progress?userId=${userId}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (data.progressData) {
+        // Restore progress from cloud
+        if (data.progressData.cases) appState.progress.completed = data.progressData.cases;
+        if (data.progressData.stats) appState.progress.stats = data.progressData.stats;
+        console.log('Progress loaded from cloud');
+        updateSyncStatus('synced');
+        updateLastSyncTime();
+      }
+    } else {
+      console.log('No previous progress found');
+      updateSyncStatus('offline');
+    }
+  } catch (error) {
+    console.error('Error loading progress:', error);
+    updateSyncStatus('error');
+  }
+}
+
+// Save progress to Netlify Blobs
+async function saveProgressToCloud() {
+  const userId = getUserId();
+  const progressData = {
+    userId: userId,
+    cases: appState.progress.completed,
+    stats: appState.progress.stats,
+    last_updated: new Date().toISOString()
+  };
+  
+  console.log('Saving progress to cloud...');
+  updateSyncStatus('syncing');
+  
+  try {
+    const response = await fetch('/.netlify/functions/save-progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, progressData })
+    });
+    
+    if (response.ok) {
+      console.log('Progress saved to cloud');
+      appState.cloudSync.lastSync = Date.now();
+      appState.cloudSync.pendingChanges = false;
+      updateSyncStatus('synced');
+      updateLastSyncTime();
+    } else {
+      console.error('Failed to save progress');
+      updateSyncStatus('error');
+    }
+  } catch (error) {
+    console.error('Error saving progress:', error);
+    updateSyncStatus('error');
+  }
+}
+
+// Local storage backup
+function saveProgress() {
+  const progressData = {
+    completed: appState.progress.completed,
+    stats: appState.progress.stats,
+    lastSaved: Date.now()
+  };
+  localStorage.setItem('caseProgress', JSON.stringify(progressData));
+  appState.cloudSync.pendingChanges = true;
+}
+
+function saveCurrentCaseNotes() {
+  const notesEl = document.getElementById('caseNotes');
+  if (notesEl && appState.selectedCase) {
+    const caseId = appState.selectedCase.id;
+    if (!appState.progress.completed[caseId]) {
+      appState.progress.completed[caseId] = {};
+    }
+    appState.progress.completed[caseId].notes = notesEl.value;
+    saveProgress();
+  }
+}
+
+// Auto-save and auto-sync
+function startAutoSave() {
+  setInterval(() => {
+    if (appState.cloudSync.pendingChanges) {
+      saveProgress();
+    }
+  }, 30000); // Save every 30 seconds
+}
+
+function startAutoSync() {
+  setInterval(() => {
+    if (appState.cloudSync.pendingChanges) {
+      syncToCloud();
+    }
+  }, 60000); // Sync every 60 seconds
+}
+
+function syncToCloud() {
+  saveProgressToCloud();
+}
+
+function updateSyncStatus(status) {
+  appState.cloudSync.status = status;
+  const statusEl = document.getElementById('syncStatus');
+  if (statusEl) {
+    const statusIcons = {
+      'synced': '✓',
+      'syncing': '⟳',
+      'offline': '○',
+      'error': '✗'
+    };
+    statusEl.textContent = `Cloud: ${statusIcons[status] || '○'}`;
+    statusEl.className = `sync-status sync-${status}`;
+  }
+}
+
+function updateLastSyncTime() {
+  const lastSyncEl = document.getElementById('lastSyncTime');
+  if (lastSyncEl && appState.cloudSync.lastSync) {
+    const minutes = Math.floor((Date.now() - appState.cloudSync.lastSync) / 60000);
+    if (minutes === 0) {
+      lastSyncEl.textContent = 'Just now';
+    } else if (minutes < 60) {
+      lastSyncEl.textContent = `${minutes}m ago`;
+    } else {
+      lastSyncEl.textContent = `${Math.floor(minutes / 60)}h ago`;
+    }
+  }
+}
+
+// ============================================
 // INITIALIZATION
 // ============================================
 

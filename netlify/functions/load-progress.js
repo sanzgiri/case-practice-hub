@@ -4,84 +4,91 @@
 
 import { getStore } from '@netlify/blobs';
 
-export default async (req, context) => {
+export const handler = async (event, context) => {
   // Allow GET requests only
-  if (req.method !== 'GET') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { 
-      status: 405,
-      headers: { 'Content-Type': 'application/json' }
-    });
+  if (event.httpMethod !== 'GET') {
+    return {
+      statusCode: 405,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Method not allowed' })
+    };
   }
 
   try {
-    // Get blob store
-    const store = await getStore('case-progress');
-    
     // Get userId from query parameter
-    const url = new URL(req.url);
-    const userId = url.searchParams.get('userId');
+    const userId = event.queryStringParameters?.userId;
     
     if (!userId) {
-      return new Response(JSON.stringify({ 
-        error: 'userId query parameter is required',
-        example: '/.netlify/functions/load-progress?userId=user_123'
-      }), { 
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return {
+        statusCode: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          error: 'userId query parameter is required',
+          example: '/.netlify/functions/load-progress?userId=user_123'
+        })
+      };
     }
+
+    console.log('Loading progress for userId:', userId);
+
+    // Get blob store with token support
+    const store = getStore({
+      name: 'case-progress',
+      siteID: process.env.SITE_ID,
+      token: process.env.NETLIFY_TOKEN || process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_BLOBS_TOKEN
+    });
     
-    // Create key matching save function
-    const key = `progress-${userId}`;
+    // Get data from Netlify Blobs
+    const data = await store.get(userId, { type: 'text' });
     
-    // Try to load from Netlify Blobs
-    let data = null;
-    try {
-      data = await store.getJSON(key);
-    } catch (e) {
-      // If not found, return empty structure
-      console.log(`No progress found for user: ${userId}`);
-      data = null;
-    }
-    
-    // Return data or empty structure if not found
-    const response = {
-      success: true,
-      userId: userId,
-      data: data || {
-        userId: userId,
-        cases: {},
-        stats: {
-          total_completed: 0,
-          total_attempted: 0,
-          average_time: 0,
-          average_score: 0,
-          market_sizing_completed: 0,
-          profitability_completed: 0
+    if (!data) {
+      console.log('No data found for userId:', userId);
+      return {
+        statusCode: 200,
+        headers: { 
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache'
         },
-        last_updated: null,
-        synced_at: null
-      },
-      found: data !== null,
-      loadedAt: new Date().toISOString()
-    };
-    
-    return new Response(JSON.stringify(response), {
-      status: 200,
+        body: JSON.stringify({ 
+          progressData: {
+            userId: userId,
+            cases: {},
+            stats: {
+              total_completed: 0,
+              total_attempted: 0,
+              average_time: 0,
+              average_score: 0,
+              market_sizing_completed: 0,
+              profitability_completed: 0
+            },
+            last_updated: null,
+            synced_at: null
+          }
+        })
+      };
+    }
+
+    console.log('Data loaded successfully');
+
+    return {
+      statusCode: 200,
       headers: { 
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
+        'Cache-Control': 'no-cache'
+      },
+      body: JSON.stringify({ progressData: JSON.parse(data) })
+    };
     
   } catch (error) {
-    console.error('Error loading progress:', error);
-    return new Response(JSON.stringify({ 
-      error: 'Failed to load progress',
-      details: error.message 
-    }), { 
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    console.error('Load error:', error);
+    return {
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        error: error.message,
+        stack: error.stack,
+        message: 'Failed to load progress'
+      })
+    };
   }
 };

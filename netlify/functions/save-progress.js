@@ -4,73 +4,62 @@
 
 import { getStore } from '@netlify/blobs';
 
-export default async (req, context) => {
+export const handler = async (event, context) => {
   // Only allow POST requests
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { 
-      status: 405,
-      headers: { 'Content-Type': 'application/json' }
-    });
+  if (event.httpMethod !== 'POST') {
+    return {
+      statusCode: 405,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ error: 'Method not allowed' })
+    };
   }
 
   try {
-    // Get blob store for case progress
-    const store = await getStore('case-progress');
-    
     // Parse request body
-    const body = await req.json();
-    const { userId, cases, stats, timestamp } = body;
+    const { userId, progressData } = JSON.parse(event.body);
+
     
     if (!userId) {
-      return new Response(JSON.stringify({ error: 'userId is required' }), { 
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return {
+        statusCode: 400,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'userId is required' })
+      };
     }
-    
-    // Create unique key for each user
-    const key = `progress-${userId}`;
-    
-    // Prepare data for storage
-    const progressData = {
-      userId,
-      cases: cases || {},
-      stats: stats || {
-        total_completed: 0,
-        total_attempted: 0,
-        average_time: 0,
-        average_score: 0,
-        market_sizing_completed: 0,
-        profitability_completed: 0
-      },
-      last_updated: new Date().toISOString(),
-      synced_at: timestamp
-    };
-    
-    // Save to Netlify Blobs (overwrites if exists)
-    await store.setJSON(key, progressData);
-    
-    return new Response(JSON.stringify({ 
-      success: true,
-      message: 'Progress saved to cloud',
-      userId: userId,
-      lastUpdated: progressData.last_updated
-    }), {
-      status: 200,
+
+    console.log('Saving progress for userId:', userId);
+
+    // Get blob store with token support
+    const store = getStore({
+      name: 'case-progress',
+      siteID: process.env.SITE_ID,
+      token: process.env.NETLIFY_TOKEN || process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_BLOBS_TOKEN
+    });
+
+    // Save to Netlify Blobs
+    await store.set(userId, JSON.stringify(progressData));
+
+    console.log('Progress saved successfully');
+
+    return {
+      statusCode: 200,
       headers: { 
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
+        'Cache-Control': 'no-cache'
+      },
+      body: JSON.stringify({ success: true, message: 'Progress saved' })
+    };
     
   } catch (error) {
-    console.error('Error saving progress:', error);
-    return new Response(JSON.stringify({ 
-      error: 'Failed to save progress',
-      details: error.message 
-    }), { 
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
+    console.error('Save error:', error);
+    return {
+      statusCode: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        error: error.message,
+        stack: error.stack,
+        message: 'Failed to save progress'
+      })
+    };
   }
 };
